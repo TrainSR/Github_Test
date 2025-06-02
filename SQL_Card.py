@@ -42,3 +42,44 @@ if folder_url:
             st.error(f"Lỗi khi truy cập thư mục: {e}")
     else:
         st.warning("Không thể lấy folder ID từ đường dẫn.")
+
+import sqlite3
+import os
+
+# Nhập tên file db (vd: quotes.db)
+db_filename = st.text_input("Nhập tên file .db muốn tạo (ví dụ: quotes.db):")
+
+if st.button("Tạo file .db và tạo bảng quotes"):
+    if not db_filename:
+        st.warning("Vui lòng nhập tên file .db")
+    else:
+        if not db_filename.endswith(".db"):
+            st.warning("Tên file phải có đuôi .db")
+        else:
+            # Kiểm tra file đã tồn tại chưa
+            if os.path.exists(db_filename):
+                st.info(f"File '{db_filename}' đã tồn tại, sẽ mở và tạo bảng nếu chưa có.")
+            else:
+                st.success(f"Đang tạo file '{db_filename}' mới.")
+            
+            try:
+                conn = sqlite3.connect(db_filename)
+                cursor = conn.cursor()
+
+                cursor.execute('''
+                CREATE TABLE IF NOT EXISTS quotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT,
+                    speaker TEXT,
+                    note TEXT,
+                    date TEXT,
+                    tag TEXT
+                )
+                ''')
+
+                conn.commit()
+                conn.close()
+                st.success(f"File '{db_filename}' đã được tạo/ cập nhật bảng quotes thành công.")
+            except Exception as e:
+                st.error(f"Lỗi khi tạo file hoặc bảng: {e}")
+
