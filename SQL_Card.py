@@ -45,41 +45,60 @@ if folder_url:
 
 import sqlite3
 import os
+from io import BytesIO
+from googleapiclient.http import MediaIoBaseUpload
 
-# Nhập tên file db (vd: quotes.db)
-db_filename = st.text_input("Nhập tên file .db muốn tạo (ví dụ: quotes.db):")
+# Giả sử bạn đã có folder_id từ đoạn code trước
 
-if st.button("Tạo file .db và tạo bảng quotes"):
-    if not db_filename:
-        st.warning("Vui lòng nhập tên file .db")
+def create_local_db_with_quotes(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quotes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT,
+            speaker TEXT,
+            note TEXT,
+            date TEXT,
+            tag TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+# Hàm upload file lên Drive folder
+def upload_file_to_drive(service, file_path, folder_id):
+    file_metadata = {
+        'name': os.path.basename(file_path),
+        'parents': [folder_id]
+    }
+    media = MediaIoBaseUpload(open(file_path, 'rb'), mimetype='application/x-sqlite3')
+    uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id, name').execute()
+    return uploaded_file
+
+# Giao diện Streamlit bổ sung
+db_name = st.text_input("Nhập tên file .db muốn tạo (ví dụ: quotes.db):")
+
+if st.button("Tạo file .db và upload lên Drive"):
+    if not folder_url:
+        st.warning("Vui lòng nhập link thư mục Google Drive trước.")
+    elif not db_name:
+        st.warning("Vui lòng nhập tên file .db.")
     else:
-        if not db_filename.endswith(".db"):
-            st.warning("Tên file phải có đuôi .db")
+        folder_id = extract_folder_id(folder_url)
+        if not folder_id:
+            st.error("Không lấy được folder ID từ URL.")
         else:
-            # Kiểm tra file đã tồn tại chưa
-            if os.path.exists(db_filename):
-                st.info(f"File '{db_filename}' đã tồn tại, sẽ mở và tạo bảng nếu chưa có.")
-            else:
-                st.success(f"Đang tạo file '{db_filename}' mới.")
-            
+            local_db_path = db_name  # tạo file local tạm thời
             try:
-                conn = sqlite3.connect(db_filename)
-                cursor = conn.cursor()
+                create_local_db_with_quotes(local_db_path)
 
-                cursor.execute('''
-                CREATE TABLE IF NOT EXISTS quotes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    content TEXT,
-                    speaker TEXT,
-                    note TEXT,
-                    date TEXT,
-                    tag TEXT
-                )
-                ''')
+                # Kết nối Drive API (giữ nguyên credentials, drive_service)
+                uploaded_file = upload_file_to_drive(drive_service, local_db_path, folder_id)
+                st.success(f"File '{uploaded_file['name']}' đã được tạo và upload lên Drive thành công (ID: {uploaded_file['id']})")
 
-                conn.commit()
-                conn.close()
-                st.success(f"File '{db_filename}' đã được tạo/ cập nhật bảng quotes thành công.")
+                # Xóa file local tạm nếu muốn
+                os.remove(local_db_path)
+
             except Exception as e:
-                st.error(f"Lỗi khi tạo file hoặc bảng: {e}")
-
+                st.error(f"Lỗi khi tạo hoặc upload file: {e}")
