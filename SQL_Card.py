@@ -7,25 +7,54 @@ import os
 # --- Sidebar chọn DB ---
 st.sidebar.title("⚙️ Cài đặt Database")
 
-# Tìm tất cả file .db trong cùng thư mục
-db_files = [f for f in os.listdir() if f.endswith(".db")]
+# --- Tìm đường dẫn chứa DB ---
+possible_paths = [
+    "C:/Users/admin/Downloads/Sync/Code Python/SQL Tools",    # PC
+    "/storage/emulated/0/Download/Sync/Sync/Code Python/SQL Tools", # Android mới
+]
+
+db_files = []
+db_folder = None
+
+for path in possible_paths:
+    if os.path.exists(path) and os.path.isdir(path):
+        db_files = [f for f in os.listdir(path) if f.endswith(".db")]
+        if db_files:
+            db_folder = path
+            break
+
+if not db_files:
+    st.sidebar.warning("❗ Không tìm thấy database trong các thư mục mặc định.")
+    custom_path = st.sidebar.text_input("📁 Nhập đường dẫn thư mục chứa database:")
+    if custom_path and os.path.isdir(custom_path):
+        db_files = [f for f in os.listdir(custom_path) if f.endswith(".db")]
+        if db_files:
+            db_folder = custom_path
+        else:
+            st.sidebar.error("Không tìm thấy file .db trong thư mục vừa nhập.")
+    elif custom_path:
+        st.sidebar.error("Đường dẫn không tồn tại hoặc không phải thư mục.")
+
+if not db_files:
+    st.stop()
+
 default_db = "quote.db"
 if default_db not in db_files:
     db_files.insert(0, default_db)
 
-# Dropdown chọn file .db
 selected_db = st.sidebar.selectbox("🗂️ Chọn Database", db_files, index=db_files.index(default_db))
-
-# Hiện DB đang dùng
 st.sidebar.markdown(f"**📌 Đang dùng:** `{selected_db}`")
 
-# Kết nối DB được chọn
+db_path = os.path.join(db_folder, selected_db)
+
 @st.cache_resource
 def get_conn(db_file):
     return sqlite3.connect(db_file, check_same_thread=False)
 
-conn = get_conn(selected_db)
+conn = get_conn(db_path)
 cursor = conn.cursor()
+
+# --- Phần còn lại giữ nguyên ---
 
 # Tạo bảng nếu chưa tồn tại
 cursor.execute('''
@@ -66,6 +95,9 @@ def get_random_quote():
         return None
     return df.sample(1).iloc[0]
 
+
+
+
 # --- Giao diện chính ---
 st.title("📚 Quote Database Manager")
 # Tab UI
@@ -89,8 +121,7 @@ with tab4:
         st.info("Chưa có quote nào trong database.")
     else:
         dau = f"({quote['date']})" if quote['date'] else ""
-        content_md = quote['content'].replace('\n', '  \n')
-
+        content_md = quote['content'].replace('\n', '<br>')
         st.markdown(f"""
         <div style='font-size: 22px; line-height: 1.6; font-weight: bold;'>
         {content_md}
@@ -164,7 +195,7 @@ with tab5:
             st.stop()
 
         # DB đích
-        available_dbs = [f for f in os.listdir() if f.endswith(".db") and f != selected_db]
+        available_dbs = [f for f in os.listdir(db_folder) if f.endswith(".db") and f != selected_db]
         if not available_dbs:
             st.warning("Không có database đích khác trong thư mục.")
             st.stop()
@@ -174,7 +205,7 @@ with tab5:
         move_mode = st.radio("Chế độ", ["📋 Sao chép", "✂️ Di chuyển"], horizontal=True)
 
         if st.button("📤 Thực hiện chuyển"):
-            target_conn = sqlite3.connect(target_db, check_same_thread=False)
+            target_conn = sqlite3.connect(os.path.join(db_folder, target_db), check_same_thread=False)
             target_cursor = target_conn.cursor()
 
             # Tạo bảng nếu chưa có
@@ -206,7 +237,6 @@ with tab5:
             target_conn.close()
 
             st.success(f"Đã {'di chuyển' if move_mode == '✂️ Di chuyển' else 'sao chép'} {len(quote_ids)} quote sang `{target_db}`.")
-
 with tab6:
     st.subheader("🗑️ Xóa Quote")
 
