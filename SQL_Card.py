@@ -9,21 +9,14 @@ import tempfile
 import pandas as pd
 import random
 import os
+import re
 
 # Lấy thông tin credentials từ secrets
 creds_dict = dict(st.secrets["gcp_service_account"])
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 drive_service = build('drive', 'v3', credentials=credentials)
 
-# Hàm lấy folder ID từ URL
-def extract_folder_id(url):
-    if "folders/" in url:
-        return url.split("folders/")[1].split("?")[0]
-    elif "id=" in url:
-        return url.split("id=")[1].split("&")[0]
-    else:
-        return None
-
+# === Helper ===
 # --- Hàm cập nhật và tải lên Drive ---
 def update_db_and_upload(file_id, df):
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
@@ -39,7 +32,117 @@ def update_db_and_upload(file_id, df):
         ).execute()
     return updated_file
 
-def create_empty_db_file(folder_id, filename="new_database.db"):
+def extract_folder_id(url):
+    if "folders/" in url:
+        return url.split("folders/")[1].split("?")[0]
+    elif "id=" in url:
+        return url.split("id=")[1].split("&")[0]
+    else:
+        return None
+def quote_edit_form(selected_row):
+    df = st.session_state.get("quotes_df", pd.DataFrame())
+
+    speaker_suggestions = sorted(df["speaker"].dropna().unique()) if not df.empty else []
+    tag_suggestions = sorted(df["tag"].dropna().unique()) if not df.empty else []
+
+    content = st.text_area("📝 Nội dung", selected_row["content"])
+
+    col1, col2 = st.columns(2)
+    with col1:
+        speaker_manual = st.text_input("👤 Nhập người nói (mới)", value="")
+    with col2:
+        speaker_select = st.selectbox("📚 Chọn người nói (có sẵn)", options=[""] + speaker_suggestions, index=(
+            speaker_suggestions.index(selected_row["speaker"]) + 1 if selected_row["speaker"] in speaker_suggestions else 0
+        ))
+
+    note = st.text_input("📌 Ghi chú", selected_row["note"])
+    date = st.text_input("📅 Ngày", selected_row["date"])
+
+    current_tags = selected_row["tag"].split()
+
+    all_tags = sorted(df["tag"].dropna().str.split().sum()) if not df.empty else []
+    all_tags = sorted(set(all_tags))
+
+    tags_selected = st.multiselect("🏷️ Chọn hoặc nhập nhiều tag", options=all_tags, default=current_tags)
+    manual_tag_input = st.text_input("🏷️ Nhập thêm tag mới (cách nhau bởi dấu cách)", value="")
+
+    all_final_tags = tags_selected + manual_tag_input.split()
+    all_final_tags = list({t.strip() for t in all_final_tags if t.strip()})
+    tag = " ".join(all_final_tags)
+
+    speaker = speaker_manual.strip() if speaker_manual.strip() else speaker_select.strip()
+    return content, speaker, note, date, tag
+
+def truncate_at_special_chars(filename, extension=".db"):
+    # Cắt tại ký tự không phải chữ cái, số, hoặc dấu gạch dưới
+    match = re.search(r'[^a-zA-Z0-9_]', filename)
+    if match:
+        filename = filename[:match.start()]
+    
+    filename = filename.strip()
+
+    # Nếu rỗng thì đặt tên mặc định
+    if not filename:
+        filename = "untitled"
+
+    return filename + extension
+
+def quote_input_form():
+    df = st.session_state.get("quotes_df", pd.DataFrame())
+
+    speaker_suggestions = sorted(df["speaker"].dropna().unique()) if not df.empty else []
+    tag_suggestions = sorted(df["tag"].dropna().unique()) if not df.empty else []
+
+    content = st.text_area("📜 Nội dung", height=150)
+
+    # --- Speaker: 2 cột ---
+    col1, col2 = st.columns(2)
+    with col1:
+        speaker_manual = st.text_input("👤 Nhập người nói (mới)")
+    with col2:
+        speaker_select = st.selectbox("📚 Chọn người nói (có sẵn)", options=[""] + speaker_suggestions)
+
+    # --- Note, Date ---
+    note = st.text_input("📝 Ghi chú (tuỳ chọn)")
+    date = st.text_input("📅 Ngày (tuỳ chọn)")
+
+    # --- Tag: 2 cột ---
+    col3, col4 = st.columns(2)
+    with col3:
+        tag_manual_raw = st.text_input("🏷️ Nhập tag mới (phân tách bằng dấu cách)")
+        tag_manual_list = [t.strip() for t in tag_manual_raw.split() if t.strip()]
+    with col4:
+        tag_select_list = st.multiselect("📚 Chọn tag có sẵn", options=tag_suggestions)
+
+    # --- Merge speaker ---
+    speaker = speaker_manual.strip() if speaker_manual.strip() else speaker_select.strip()
+
+    # --- Merge tag ---
+    tag_list = list(set(tag_manual_list + tag_select_list))
+    tag = " ".join(tag_list) if tag_list else ""
+
+    return content, speaker, note, date, tag
+
+
+def delete_db_file(folder_id, filename):
+    """Xoá file theo tên trong thư mục cụ thể"""
+    try:
+        results = drive_service.files().list(
+            q=f"'{folder_id}' in parents and name = '{filename}'",
+            fields="files(id, name)",
+            pageSize=1
+        ).execute()
+        files = results.get("files", [])
+        if files:
+            file_id = files[0]["id"]
+            drive_service.files().delete(fileId=file_id).execute()
+            return True
+        return False
+    except Exception as e:
+        print(f"Lỗi xoá file: {e}")
+        return False
+
+def create_empty_db_file(folder_id, filename):
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         conn = sqlite3.connect(tmp.name)
         cursor = conn.cursor()
@@ -117,7 +220,7 @@ def main_ui():
         if "random_quote" not in st.session_state:
             st.session_state.random_quote = get_random_quote()
 
-        quote = st.session_state.random_quote
+        quote = get_random_quote()
 
         if quote is None:
             st.info("Chưa có quote nào trong database.")
@@ -137,26 +240,19 @@ def main_ui():
 
         st.markdown("---")
         if st.button("🎲 Quote khác"):
-            st.session_state.random_quote = get_random_quote()
+            st.rerun()
     with tab1:
         st.subheader("➕ Thêm quote mới")
 
         with st.form("add_quote_form"):
-            content = st.text_area("📜 Nội dung", height=150)
-            speaker = st.text_input("👤 Người nói")
-            note = st.text_input("📝 Ghi chú (tuỳ chọn)")
-            date = st.text_input("📅 Ngày (tuỳ chọn)")
-            tag = st.text_input("🏷️ Tag")
+            content, speaker, note, date, tag = quote_input_form()
 
             submitted = st.form_submit_button("✅ Thêm quote")
             if submitted:
                 if not content.strip():
                     st.warning("⚠️ Nội dung không được để trống.")
                 else:
-                    # Thay " thành ' trong nội dung
                     cleaned_content = f'"{content.replace('"', "'").strip()}"'
-
-                    # Tính ID mới
                     df = st.session_state["quotes_df"]
                     new_id = int(df["id"].max() + 1) if not df.empty else 1
                     new_row = {
@@ -172,6 +268,7 @@ def main_ui():
                         ignore_index=True
                     )
                     st.success("✅ Đã thêm quote mới vào bộ nhớ tạm.")
+
     with tab2:
         st.subheader("📋 Danh sách toàn bộ quote")
 
@@ -200,14 +297,8 @@ def main_ui():
 
                 st.markdown("---")
                 st.markdown(f"### ✏️ Sửa Quote ID {selected_id}")
-
                 with st.form("edit_selected_quote"):
-                    new_content = st.text_area("📝 Nội dung", selected_row["content"])
-                    new_speaker = st.text_input("🗣️ Người nói", selected_row["speaker"])
-                    new_note = st.text_input("📌 Ghi chú", selected_row["note"])
-                    new_date = st.text_input("📅 Ngày", selected_row["date"])
-                    new_tag = st.text_input("🏷️ Tag", selected_row["tag"])
-
+                    new_content, new_speaker, new_note, new_date, new_tag = quote_edit_form(selected_row)
                     submit_edit = st.form_submit_button("💾 Lưu thay đổi")
 
                     if submit_edit:
@@ -221,12 +312,18 @@ def main_ui():
             else:
                 st.info("Không tìm thấy quote nào khớp.")
     with tab3:
+        st.markdown("### 🎯 Chọn database mục tiêu để Copy/Move")
+        target_db_name = st.selectbox(
+            "🗃️ Chọn database khác để sao chép/di chuyển (ngoại trừ file hiện tại):",
+            [f["name"] for f in db_files if f["id"] != selected_db_file["id"]]
+        )
+        target_db_file = next(f for f in db_files if f["name"] == target_db_name)
         st.subheader("🗑️ Xóa nhiều quote")
-
         df = get_all_quotes()
         if df.empty:
             st.info("Chưa có quote nào để xóa.")
         else:
+
             search_text = st.text_input("🔍 Tìm quote theo nội dung hoặc tag để lọc:")
             filtered_df = df[
                 df["content"].str.contains(search_text, case=False, na=False) |
@@ -234,28 +331,45 @@ def main_ui():
             ] if search_text else df
 
             if not filtered_df.empty:
-                filtered_df["label"] = filtered_df.apply(
-                    lambda row: f"{row['id']} | {row['content'][:50]}...", axis=1
+                options = [f"{row['id']} | {row['content'][:50]}..." for _, row in filtered_df.iterrows()]
+                selected_options = st.multiselect(
+                    "Chọn các quote để xóa:",
+                    options=options
                 )
-                selected_labels = st.multiselect(
-                    "Chọn các quote để xóa:", 
-                    options=filtered_df["label"].tolist()
-                )
-                
-                selected_ids = [
-                    int(label.split("|")[0].strip()) for label in selected_labels
-                ]
+
+                selected_ids = [int(option.split("|")[0].strip()) for option in selected_options]
 
                 if selected_ids:
-                    st.warning(f"Bạn sắp xóa {len(selected_ids)} quote.")
-                    if st.button("❌ Xác nhận xóa"):
+                    st.warning(f"🔔 Bạn đã chọn {len(selected_ids)} quote.")
+
+                    col_copy, col_move, col_delete = st.columns(3)
+                    if col_copy.button("📄 Copy sang database khác"):
+                        if target_db_file:
+                            target_df = load_quotes_from_drive(target_db_file["id"])
+                            rows_to_copy = df[df["id"].isin(selected_ids)].copy()
+                            rows_to_copy["id"] = target_df["id"].max() + 1 if not target_df.empty else 1
+                            target_df = pd.concat([target_df, rows_to_copy], ignore_index=True)
+                            update_db_and_upload(target_db_file["id"], target_df)
+                            st.success(f"✅ Đã copy {len(rows_to_copy)} quote sang `{target_db_file['name']}`.")
+
+                    if col_move.button("📂 Move sang database khác"):
+                        if target_db_file:
+                            target_df = load_quotes_from_drive(target_db_file["id"])
+                            rows_to_move = df[df["id"].isin(selected_ids)].copy()
+                            rows_to_move["id"] = target_df["id"].max() + 1 if not target_df.empty else 1
+                            target_df = pd.concat([target_df, rows_to_move], ignore_index=True)
+                            update_db_and_upload(target_db_file["id"], target_df)
+
+                            # Xoá khỏi file hiện tại
+                            st.session_state["quotes_df"] = df[~df["id"].isin(selected_ids)].reset_index(drop=True)
+                            st.success(f"✅ Đã move {len(rows_to_move)} quote sang `{target_db_file['name']}`.")
+
+                    if col_delete.button("❌ Xác nhận xóa"):
                         st.session_state["quotes_df"] = df[~df["id"].isin(selected_ids)].reset_index(drop=True)
                         st.success(f"✅ Đã xóa {len(selected_ids)} quote.")
+
             else:
                 st.info("Không tìm thấy quote nào khớp.")
-
-
-
 
 # === Sidebar chọn DB ===
 
@@ -263,13 +377,23 @@ st.sidebar.title("⚙️ Cài đặt Database")
 folder_url = st.sidebar.text_input("📂 Nhập link thư mục Google Drive chứa DB:")
 folder_id = extract_folder_id(folder_url) if folder_url else None
 selected_db_file = None
-
+new_file_name = truncate_at_special_chars(st.sidebar.text_input("Nhập tên file database cần tạo hoặc xóa"))
 if st.sidebar.button("➕ Tạo file database rỗng"):
     if folder_id:
-        new_file = create_empty_db_file(folder_id)
+        new_file = create_empty_db_file(folder_id, new_file_name)
         st.sidebar.success(f"Đã tạo file: `{new_file['name']}` (ID: {new_file['id']})")
     else:
         st.sidebar.warning("Vui lòng nhập link thư mục trước.")
+
+if st.sidebar.button("🗑️ Xoá file database"):
+    if folder_id:
+        success = delete_db_file(folder_id, new_file_name)
+        if success:
+            st.sidebar.success(f"✅ Đã xoá file: `{new_file_name}`")
+        else:
+            st.sidebar.error(f"❌ Không tìm thấy hoặc không thể xoá: `{new_file_name}`")
+    else:
+        st.sidebar.warning("⚠️ Vui lòng nhập link thư mục trước.")
 
 if folder_id:
     try:
