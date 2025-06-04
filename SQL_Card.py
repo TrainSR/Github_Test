@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import pandas as pd
 import re
+import random
 
 # Lấy thông tin credentials từ secrets
 creds_dict = dict(st.secrets["gcp_service_account"])
@@ -195,11 +196,13 @@ def load_quotes_from_drive(file_id):
 def get_all_quotes():
     return st.session_state.get("quotes_df", pd.DataFrame())
 
-def get_random_quote():
-    df = get_all_quotes()
-    if df.empty:
+def get_random_quote(df=None):
+    if df is None:
+        df = st.session_state.get("quotes_df")
+    if df is None or df.empty:
         return None
-    return df.sample(1).iloc[0]
+    return df.sample(1).iloc[0].to_dict()
+
 
 # === Giao diện chính ===
 
@@ -216,30 +219,57 @@ def main_ui():
     with tab4:
         st.subheader("🎲")
 
-        if "random_quote" not in st.session_state:
-            st.session_state.random_quote = get_random_quote()
+        df = st.session_state.get("quotes_df")
 
-        quote = get_random_quote()
-
-        if quote is None:
+        if df is None or df.empty:
             st.info("Chưa có quote nào trong database.")
         else:
-            dau = f"({quote['date']})" if quote['date'] else ""
-            content_md = quote['content'].replace('\n', '<br>')
+            all_tags = sorted(set(tag for tags in df["tag"].dropna() for tag in tags.split(" ")))
 
-            st.markdown(f"""
-            <div style='font-size: 22px; line-height: 1.6; font-weight: bold;'>
-            {content_md}
-            </div>
-            <div style='font-size: 18px; margin-top: 10px;'>
-            - <i>{quote['speaker']} {quote['note']}</i> {dau}<br><br>
-            🏷️ <code>{quote['tag']}</code>
-            </div>
-            """, unsafe_allow_html=True)
+            with st.sidebar:
+                st.markdown("🎛️ **Bộ lọc Tag Random**")
 
-        st.markdown("---")
-        if st.button("🎲 Quote khác"):
-            pass
+                included_tags = st.multiselect("✅ Bao gồm 1 trong các tag:", options=all_tags, key="include_tags")
+                default_excluded = ["#pending"] if "#pending" in all_tags else []
+                excluded_tags = st.multiselect("🚫 Loại bỏ các tag:", options=all_tags, default=default_excluded, key="exclude_tags")
+
+
+            def quote_filter(row):
+                tags = set(row["tag"].split(",")) if pd.notna(row["tag"]) else set()
+                include_ok = not included_tags or any(tag in tags for tag in included_tags)
+                exclude_ok = not any(tag in tags for tag in excluded_tags)
+                return include_ok and exclude_ok
+
+            filtered_df = df[df.apply(quote_filter, axis=1)]
+
+            quote = None
+            if not filtered_df.empty:
+                quote = filtered_df.sample(1).iloc[0]
+                dau = f"({quote['date']})" if quote['date'] else ""
+                content_md = quote['content'].replace('\n', '<br>')
+                st.markdown(f"""
+                <div style='font-size: 22px; line-height: 1.6; font-weight: bold;'>
+                {content_md}
+                </div>
+                <div style='font-size: 18px; margin-top: 10px;'>
+                - <i>{quote['speaker']} {quote['note']}</i> {dau}<br><br>
+                🏷️ <code>{quote['tag']}</code>
+                </div><br>
+                """, unsafe_allow_html=True)
+            else:
+                st.warning("Không có quote nào phù hợp với bộ lọc.")
+
+            if st.button("🎲 Quote khác"):
+                pass
+            if st.button("📝 Gắn tag #pending"):
+                quote_id = quote["id"]
+                df.loc[df["id"] == quote_id, "tag"] = df.loc[df["id"] == quote_id, "tag"].apply(
+                    lambda t: "#pending" if pd.isna(t) else t if "#pending" in t else f"{t} #pending"
+                )
+                st.session_state["quotes_df"] = df
+                st.success("✅ Đã gắn tag #pending cho quote này.")
+
+
     with tab1:
         st.subheader("➕ Thêm quote mới")
 
@@ -269,45 +299,43 @@ def main_ui():
                     st.success("✅ Đã thêm quote mới vào bộ nhớ tạm.")
 
     with tab2:
-        st.subheader("📋 Danh sách toàn bộ quote")
+        with st.expander("📋 Danh sách toàn bộ quote"):
+            df = get_all_quotes()
+            if df.empty:
+                st.info("Chưa có quote nào.")
+            else:
+                # Hiển thị toàn bộ bảng
+                st.dataframe(df, use_container_width=True)
+                # Tìm các quote bị trùng nội dung sau khi strip và lowercase
+                st.markdown("### 🔁 Các quote bị trùng nội dung")
 
-        df = get_all_quotes()
-        if df.empty:
-            st.info("Chưa có quote nào.")
-        else:
-            # Hiển thị toàn bộ bảng
-            st.dataframe(df, use_container_width=True)
-            # Tìm các quote bị trùng nội dung sau khi strip và lowercase
-            st.markdown("### 🔁 Các quote bị trùng nội dung (sau khi strip & lowercase)")
+                if not df.empty:
+                    # Tạo cột chuẩn hoá content để tìm trùng
+                    df["normalized_content"] = df["content"].str.strip().str.lower()
+                    duplicates = df[df.duplicated("normalized_content", keep=False)].sort_values("normalized_content")
 
-            if not df.empty:
-                # Tạo cột chuẩn hoá content để tìm trùng
-                df["normalized_content"] = df["content"].str.strip().str.lower()
-                duplicates = df[df.duplicated("normalized_content", keep=False)].sort_values("normalized_content")
+                    if not duplicates.empty:
+                        st.dataframe(duplicates.drop(columns=["normalized_content"]), use_container_width=True)
+                    else:
+                        st.info("✅ Không có quote nào bị trùng.")
 
-                if not duplicates.empty:
-                    st.dataframe(duplicates.drop(columns=["normalized_content"]), use_container_width=True)
-                else:
-                    st.info("✅ Không có quote nào bị trùng.")
+        st.markdown("### 🔍 Tìm và sửa quote")
+        search_text = st.text_input("Tìm quote theo nội dung hoặc tag:")
+        filtered_df = df[
+            df["content"].str.contains(search_text, case=False, na=False) |
+            df["tag"].str.contains(search_text, case=False, na=False)
+        ]
 
-            st.markdown("### 🔍 Tìm và sửa quote")
-            search_text = st.text_input("Tìm quote theo nội dung hoặc tag:")
-            filtered_df = df[
-                df["content"].str.contains(search_text, case=False, na=False) |
-                df["tag"].str.contains(search_text, case=False, na=False)
-            ]
+        if not filtered_df.empty:
+            quote_options = {
+                f"{row['id']} | {row['content'][:50]}...": row['id']
+                for _, row in filtered_df.iterrows()
+            }
+            selected_label = st.selectbox("Chọn quote để sửa:", list(quote_options.keys()))
+            selected_id = quote_options[selected_label]
+            selected_row = df[df["id"] == selected_id].iloc[0]
 
-            if not filtered_df.empty:
-                quote_options = {
-                    f"{row['id']} | {row['content'][:50]}...": row['id']
-                    for _, row in filtered_df.iterrows()
-                }
-                selected_label = st.selectbox("Chọn quote để sửa:", list(quote_options.keys()))
-                selected_id = quote_options[selected_label]
-                selected_row = df[df["id"] == selected_id].iloc[0]
-
-                st.markdown("---")
-                st.markdown(f"### ✏️ Sửa Quote ID {selected_id}")
+            with st.expander(f"✏️ Sửa Quote ID {selected_id}"):
                 with st.form("edit_selected_quote"):
                     new_content, new_speaker, new_note, new_date, new_tag = quote_edit_form(selected_row)
                     submit_edit = st.form_submit_button("💾 Lưu thay đổi")
@@ -320,8 +348,8 @@ def main_ui():
                         st.session_state["quotes_df"].at[idx, "date"] = new_date
                         st.session_state["quotes_df"].at[idx, "tag"] = new_tag
                         st.success("✅ Đã cập nhật quote.")
-            else:
-                st.info("Không tìm thấy quote nào khớp.")
+        else:
+            st.info("Không tìm thấy quote nào khớp.")
     with tab3:
         st.markdown("### 🎯 Chọn database mục tiêu để Copy/Move")
         target_db_name = st.selectbox(
