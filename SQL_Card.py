@@ -7,14 +7,13 @@ import io
 import sqlite3
 import tempfile
 import pandas as pd
-import random
-import os
 import re
 
 # Lấy thông tin credentials từ secrets
 creds_dict = dict(st.secrets["gcp_service_account"])
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 drive_service = build('drive', 'v3', credentials=credentials)
+
 
 # === Helper ===
 # --- Hàm cập nhật và tải lên Drive ---
@@ -278,6 +277,18 @@ def main_ui():
         else:
             # Hiển thị toàn bộ bảng
             st.dataframe(df, use_container_width=True)
+            # Tìm các quote bị trùng nội dung sau khi strip và lowercase
+            st.markdown("### 🔁 Các quote bị trùng nội dung (sau khi strip & lowercase)")
+
+            if not df.empty:
+                # Tạo cột chuẩn hoá content để tìm trùng
+                df["normalized_content"] = df["content"].str.strip().str.lower()
+                duplicates = df[df.duplicated("normalized_content", keep=False)].sort_values("normalized_content")
+
+                if not duplicates.empty:
+                    st.dataframe(duplicates.drop(columns=["normalized_content"]), use_container_width=True)
+                else:
+                    st.info("✅ Không có quote nào bị trùng.")
 
             st.markdown("### 🔍 Tìm và sửa quote")
             search_text = st.text_input("Tìm quote theo nội dung hoặc tag:")
@@ -363,6 +374,8 @@ def main_ui():
                             # Xoá khỏi file hiện tại
                             st.session_state["quotes_df"] = df[~df["id"].isin(selected_ids)].reset_index(drop=True)
                             st.success(f"✅ Đã move {len(rows_to_move)} quote sang `{target_db_file['name']}`.")
+                            update_db_and_upload(selected_db_file["id"], st.session_state["quotes_df"])
+
 
                     if col_delete.button("❌ Xác nhận xóa"):
                         st.session_state["quotes_df"] = df[~df["id"].isin(selected_ids)].reset_index(drop=True)
