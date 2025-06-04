@@ -239,7 +239,7 @@ def main_ui():
 
         st.markdown("---")
         if st.button("🎲 Quote khác"):
-            st.rerun()
+            pass
     with tab1:
         st.subheader("➕ Thêm quote mới")
 
