@@ -57,6 +57,7 @@ def quote_edit_form(selected_row):
 
     note = st.text_input("📌 Ghi chú", selected_row["note"])
     date = st.text_input("📅 Ngày", selected_row["date"])
+    link = st.text_input("🔗 Link", selected_row["link"])
 
     current_tags = selected_row["tag"].split()
 
@@ -71,7 +72,7 @@ def quote_edit_form(selected_row):
     tag = " ".join(all_final_tags)
 
     speaker = speaker_manual.strip() if speaker_manual.strip() else speaker_select.strip()
-    return content, speaker, note, date, tag
+    return content, speaker, note, date, tag, link
 
 def truncate_at_special_chars(filename, extension=".db"):
     # Cắt tại ký tự không phải chữ cái, số, hoặc dấu gạch dưới
@@ -102,9 +103,10 @@ def quote_input_form():
     with col2:
         speaker_select = st.selectbox("📚 Chọn người nói (có sẵn)", options=[""] + speaker_suggestions)
 
-    # --- Note, Date ---
+    # --- Note, Date, Link ---
     note = st.text_input("📝 Ghi chú (tuỳ chọn)")
     date = st.text_input("📅 Ngày (tuỳ chọn)")
+    link = st.text_input("🔗 Link (tuỳ chọn)")
 
     # --- Tag: 2 cột ---
     col3, col4 = st.columns(2)
@@ -121,7 +123,7 @@ def quote_input_form():
     tag_list = list(set(tag_manual_list + tag_select_list))
     tag = " ".join(tag_list) if tag_list else ""
 
-    return content, speaker, note, date, tag
+    return content, speaker, note, date, tag, link
 
 
 def delete_db_file(folder_id, filename):
@@ -153,7 +155,8 @@ def create_empty_db_file(folder_id, filename):
                 speaker TEXT,
                 note TEXT,
                 date TEXT,
-                tag TEXT
+                tag TEXT,
+                link TEXT
             )
         ''')
         conn.commit()
@@ -217,8 +220,6 @@ def main_ui():
     ])
 
     with tab4:
-        st.subheader("🎲")
-
         df = st.session_state.get("quotes_df")
 
         if df is None or df.empty:
@@ -248,6 +249,7 @@ def main_ui():
                 dau = f"({quote['date']})" if quote['date'] else ""
                 content_md = quote['content'].replace('\n', '<br>')
                 st.markdown(f"""
+                {quote['link']}
                 <div style='font-size: 22px; line-height: 1.6; font-weight: bold;'>
                 {content_md}
                 </div>
@@ -259,27 +261,33 @@ def main_ui():
             else:
                 st.warning("Không có quote nào phù hợp với bộ lọc.")
 
-            if st.button("🎲 Quote khác"):
-                pass
-            if st.button("📝 Gắn tag #pending"):
-                quote_id = quote["id"]
-                df.loc[df["id"] == quote_id, "tag"] = df.loc[df["id"] == quote_id, "tag"].apply(
-                    lambda t: "#pending" if pd.isna(t) else t if "#pending" in t else f"{t} #pending"
-                )
-                st.session_state["quotes_df"] = df
-                st.success("✅ Đã gắn tag #pending cho quote này.")
+            col2, col1 = st.columns(2)
+
+            with col1:
+                if st.button("🎲 Quote khác"):
+                    pass
+
+            with col2:
+                if st.button("📝 Pending"):
+                    quote_id = quote["id"]
+                    df.loc[df["id"] == quote_id, "tag"] = df.loc[df["id"] == quote_id, "tag"].apply(
+                        lambda t: "#pending" if pd.isna(t) else t if "#pending" in t else f"{t} #pending"
+                    )
+                    st.session_state["quotes_df"] = df
+                    st.success("✅ Đã gắn tag #pending cho quote này.")
+
 
 
     with tab1:
         st.subheader("➕ Thêm quote mới")
 
         with st.form("add_quote_form"):
-            content, speaker, note, date, tag = quote_input_form()
+            content, speaker, note, date, tag, link = quote_input_form()
 
             submitted = st.form_submit_button("✅ Thêm quote")
             if submitted:
-                if not content.strip():
-                    st.warning("⚠️ Nội dung không được để trống.")
+                if not any([content.strip(), speaker.strip(), note.strip(), date.strip(), tag.strip(), link.strip()]):
+                    st.warning("⚠️ Ít nhất phải có một trường được điền.")
                 else:
                     cleaned_content = f'"{content.replace('"', "'").strip()}"'
                     df = st.session_state["quotes_df"]
@@ -290,7 +298,8 @@ def main_ui():
                         "speaker": speaker.strip(),
                         "note": note.strip(),
                         "date": date.strip(),
-                        "tag": tag.strip()
+                        "tag": tag.strip(),
+                        "link": link.strip()
                     }
                     st.session_state["quotes_df"] = pd.concat(
                         [st.session_state["quotes_df"], pd.DataFrame([new_row])],
@@ -304,20 +313,21 @@ def main_ui():
             if df.empty:
                 st.info("Chưa có quote nào.")
             else:
-                # Hiển thị toàn bộ bảng
-                st.dataframe(df, use_container_width=True)
-                # Tìm các quote bị trùng nội dung sau khi strip và lowercase
+                # Tạo cột chuẩn hoá content để tìm trùng
+                df["normalized_content"] = df["content"].str.strip().str.lower()
+
+                # Hiển thị bảng mà không có cột normalized_content
+                st.dataframe(df.drop(columns=["normalized_content"]), use_container_width=True)
+
+                # Tìm các quote bị trùng nội dung
                 st.markdown("### 🔁 Các quote bị trùng nội dung")
+                duplicates = df[df.duplicated("normalized_content", keep=False)].sort_values("normalized_content")
 
-                if not df.empty:
-                    # Tạo cột chuẩn hoá content để tìm trùng
-                    df["normalized_content"] = df["content"].str.strip().str.lower()
-                    duplicates = df[df.duplicated("normalized_content", keep=False)].sort_values("normalized_content")
+                if not duplicates.empty:
+                    st.dataframe(duplicates.drop(columns=["normalized_content"]), use_container_width=True)
+                else:
+                    st.info("✅ Không có quote nào bị trùng.")
 
-                    if not duplicates.empty:
-                        st.dataframe(duplicates.drop(columns=["normalized_content"]), use_container_width=True)
-                    else:
-                        st.info("✅ Không có quote nào bị trùng.")
 
         st.markdown("### 🔍 Tìm và sửa quote")
         search_text = st.text_input("Tìm quote theo nội dung hoặc tag:")
@@ -337,7 +347,7 @@ def main_ui():
 
             with st.expander(f"✏️ Sửa Quote ID {selected_id}"):
                 with st.form("edit_selected_quote"):
-                    new_content, new_speaker, new_note, new_date, new_tag = quote_edit_form(selected_row)
+                    new_content, new_speaker, new_note, new_date, new_tag, new_link = quote_edit_form(selected_row)
                     submit_edit = st.form_submit_button("💾 Lưu thay đổi")
 
                     if submit_edit:
@@ -347,6 +357,7 @@ def main_ui():
                         st.session_state["quotes_df"].at[idx, "note"] = new_note
                         st.session_state["quotes_df"].at[idx, "date"] = new_date
                         st.session_state["quotes_df"].at[idx, "tag"] = new_tag
+                        st.session_state["quotes_df"].at[idx, "link"] = new_link
                         st.success("✅ Đã cập nhật quote.")
         else:
             st.info("Không tìm thấy quote nào khớp.")
