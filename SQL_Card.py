@@ -236,7 +236,7 @@ def main_ui():
 
 
             def quote_filter(row):
-                tags = set(row["tag"].split(",")) if pd.notna(row["tag"]) else set()
+                tags = set(row["tag"].split()) if pd.notna(row["tag"]) else set()
                 include_ok = not included_tags or any(tag in tags for tag in included_tags)
                 exclude_ok = not any(tag in tags for tag in excluded_tags)
                 return include_ok and exclude_ok
