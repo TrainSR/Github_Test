@@ -475,7 +475,7 @@ if selected_db_file:
         st.sidebar.success(f"Đã nạp {len(quotes_df)} quote từ `{selected_db_file['name']}`.")
     else:
         quotes_df = st.session_state["quotes_df"]
-    main_ui()
+    main_ui():
     # --- Trong phần sidebar sau khi chọn selected_db_file ---
     if selected_db_file:
         if st.sidebar.button("💾 Cập nhật & Tải lên Drive"):
