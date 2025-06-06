@@ -367,7 +367,7 @@ def main_ui():
             "🗃️ Chọn database khác để sao chép/di chuyển (ngoại trừ file hiện tại):",
             [f["name"] for f in db_files if f["id"] != selected_db_file["id"]]
         )
-        target_db_file = next(f for f in db_files if f["name"] == target_db_name)
+        target_db_file = next((f for f in db_files if f["name"] == target_db_name), None)
         st.subheader("🗑️ Xóa nhiều quote")
         df = get_all_quotes()
         if df.empty:
