@@ -286,10 +286,10 @@ def main_ui():
 
             submitted = st.form_submit_button("✅ Thêm quote")
             if submitted:
-                if not any([content.strip(), speaker.strip(), note.strip(), date.strip(), tag.strip(), link.strip()]):
+                if not any([content, speaker, note, date, tag, link]):
                     st.warning("⚠️ Ít nhất phải có một trường được điền.")
                 else:
-                    cleaned_content = f'"{content.replace('"', "'").strip()}"'
+                    cleaned_content = content.strip().strip('"').replace('"', "'")
                     df = st.session_state["quotes_df"]
                     new_id = int(df["id"].max() + 1) if not df.empty else 1
                     new_row = {
