@@ -294,7 +294,7 @@ def main_ui():
                     new_id = int(df["id"].max() + 1) if not df.empty else 1
                     new_row = {
                         "id": new_id,
-                        "content": cleaned_content,
+                        "content": f'"{cleaned_content}"',
                         "speaker": speaker.strip(),
                         "note": note.strip(),
                         "date": date.strip(),
