@@ -245,21 +245,15 @@ def main_ui():
             if df.empty:
                 st.info("Chưa có quote nào.")
             else:
-                # Tạo cột chuẩn hoá content để tìm trùng
                 df["normalized_content"] = df["content"].str.strip().str.lower()
-
-                # Hiển thị bảng mà không có cột normalized_content
                 st.dataframe(df.drop(columns=["normalized_content"]), use_container_width=True)
 
-                # Tìm các quote bị trùng nội dung
                 st.markdown("### 🔁 Các quote bị trùng nội dung")
                 duplicates = df[df.duplicated("normalized_content", keep=False)].sort_values("normalized_content")
-
                 if not duplicates.empty:
                     st.dataframe(duplicates.drop(columns=["normalized_content"]), use_container_width=True)
                 else:
                     st.info("✅ Không có quote nào bị trùng.")
-
 
         st.markdown("### 🔍 Tìm và sửa quote")
         search_text = st.text_input("Tìm quote theo nội dung hoặc tag:")
@@ -269,30 +263,31 @@ def main_ui():
         ]
 
         if not filtered_df.empty:
+            # Tạo mapping label -> index (vị trí dòng trong df)
             quote_options = {
-                f"{row['id']} | {row['content'][:50]}...": row['id']
-                for _, row in filtered_df.iterrows()
+                f"{idx} | {row['content'][:50]}...": idx
+                for idx, row in filtered_df.iterrows()
             }
             selected_label = st.selectbox("Chọn quote để sửa:", list(quote_options.keys()))
-            selected_id = quote_options[selected_label]
-            selected_row = df[df["id"] == selected_id].iloc[0]
+            selected_index = quote_options[selected_label]
+            selected_row = df.iloc[selected_index]
 
-            with st.expander(f"✏️ Sửa Quote ID {selected_id}"):
+            with st.expander(f"✏️ Sửa Quote tại index {selected_index}"):
                 with st.form("edit_selected_quote"):
                     new_content, new_speaker, new_note, new_date, new_tag, new_link = quote_edit_form(selected_row)
                     submit_edit = st.form_submit_button("💾 Lưu thay đổi")
 
                     if submit_edit:
-                        idx = df[df["id"] == selected_id].index[0]
-                        st.session_state["quotes_df"].at[idx, "content"] = new_content
-                        st.session_state["quotes_df"].at[idx, "speaker"] = new_speaker
-                        st.session_state["quotes_df"].at[idx, "note"] = new_note
-                        st.session_state["quotes_df"].at[idx, "date"] = new_date
-                        st.session_state["quotes_df"].at[idx, "tag"] = new_tag
-                        st.session_state["quotes_df"].at[idx, "link"] = new_link
+                        st.session_state["quotes_df"].at[selected_index, "content"] = new_content
+                        st.session_state["quotes_df"].at[selected_index, "speaker"] = new_speaker
+                        st.session_state["quotes_df"].at[selected_index, "note"] = new_note
+                        st.session_state["quotes_df"].at[selected_index, "date"] = new_date
+                        st.session_state["quotes_df"].at[selected_index, "tag"] = new_tag
+                        st.session_state["quotes_df"].at[selected_index, "link"] = new_link
                         st.success("✅ Đã cập nhật quote.")
         else:
             st.info("Không tìm thấy quote nào khớp.")
+
     with tab3:
         st.markdown("### 🎯 Chọn database mục tiêu để Copy/Move")
         target_db_name = st.selectbox(
