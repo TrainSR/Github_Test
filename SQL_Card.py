@@ -17,8 +17,6 @@ drive_service = build('drive', 'v3', credentials=credentials)
 Default_db = st.secrets["app_config"]["drive_folder_id"]
 
 
-# === Helper ===
-# --- Hàm cập nhật và tải lên Drive ---
 def update_db_and_upload(file_id, df):
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         conn = sqlite3.connect(tmp.name)
@@ -426,8 +424,14 @@ with tab4:
             st.markdown("🎛️ **Bộ lọc Tag Random**")
 
             included_tags = st.multiselect("✅ Bao gồm 1 trong các tag:", options=all_tags, key="include_tags")
-            default_excluded = ["#pending"] if "#pending" in all_tags else []
-            excluded_tags = st.multiselect("🚫 Loại bỏ các tag:", options=all_tags, default=default_excluded, key="exclude_tags")
+
+            excluded_tags = st.multiselect(
+                "🚫 Loại bỏ các tag:",
+                options=all_tags,
+                default=all_tags,  # Mặc định loại bỏ toàn bộ tag
+                key="exclude_tags"
+            )
+
 
 
         def quote_filter(row):
