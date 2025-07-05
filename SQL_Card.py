@@ -14,7 +14,7 @@ import random
 creds_dict = dict(st.secrets["gcp_service_account"])
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 drive_service = build('drive', 'v3', credentials=credentials)
-Default_db = st.secrets["app_config"]["drive_folder_id"]
+Default_db = ""
 
 
 def update_db_and_upload(file_id, df):
