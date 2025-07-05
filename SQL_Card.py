@@ -14,7 +14,6 @@ import random
 creds_dict = dict(st.secrets["gcp_service_account"])
 credentials = service_account.Credentials.from_service_account_info(creds_dict)
 drive_service = build('drive', 'v3', credentials=credentials)
-Default_db = ""
 
 
 def update_db_and_upload(file_id, df):
@@ -402,8 +401,6 @@ if folder_id:
     except Exception as e:
         st.sidebar.error(f"Lỗi khi truy cập Drive: {e}")
 df = st.session_state.get("quotes_df")
-if not (selected_db_file or (df is not None and not df.empty)):
-    st.session_state["quotes_df"] = load_quotes_from_drive(Default_db)
 st.title("📚 Quote Database Manager")
 
 tab4, tab1, tab2, tab3 = st.tabs([
