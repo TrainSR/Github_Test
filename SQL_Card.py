@@ -203,10 +203,82 @@ def get_random_quote(df=None):
     if df is None or df.empty:
         return None
     return df.sample(1).iloc[0].to_dict()
-
+def update_reload():
+    global selected_db_file
+    df_to_save = st.session_state.get("quotes_df")
+    if df_to_save is not None and not df_to_save.empty:
+        try:
+            update_db_and_upload(selected_db_file["id"], df_to_save)
+            st.sidebar.success("✅ Đã cập nhật database và tải lên Drive thành công.")
+        except Exception as e:
+            st.sidebar.error(f"❌ Lỗi khi tải lên Drive: {e}")
+    else:
+        st.sidebar.warning("⚠️ Database trống, không có gì để cập nhật.")
 # === Giao diện chính ===
 
 def main_ui():
+    with tab4:
+        df = st.session_state.get("quotes_df")
+        if df is None or df.empty:
+            st.info("Chưa có quote nào trong database.")
+        else:
+            all_tags = sorted(set(tag for tags in df["tag"].dropna() for tag in tags.split(" ")))
+            try:
+                all_tags.remove("")
+            except:
+                pass
+
+            with st.sidebar:
+                st.markdown("🎛️ **Bộ lọc Tag Random**")
+
+                included_tags = st.multiselect("✅ Bao gồm 1 trong các tag:", options=all_tags, key="include_tags")
+
+                excluded_tags = st.multiselect(
+                    "🚫 Loại bỏ các tag:",
+                    options=all_tags,
+                    default=all_tags,  # Mặc định loại bỏ toàn bộ tag
+                    key="exclude_tags"
+                )
+            def quote_filter(row):
+                tags = set(row["tag"].split()) if pd.notna(row["tag"]) else set()
+                include_ok = not included_tags or any(tag in tags for tag in included_tags)
+                exclude_ok = not any(tag in tags for tag in excluded_tags)
+                return include_ok and exclude_ok
+
+            filtered_df = df[df.apply(quote_filter, axis=1)]
+
+            quote = None
+            if not filtered_df.empty:
+                quote = filtered_df.sample(1).iloc[0]
+                dau = f"({quote['date']})" if quote['date'] else ""
+                content_md = quote['content'].replace('\n', '<br>')
+                st.markdown(f"""
+                {quote['link']}
+                <div style='font-size: 22px; line-height: 1.6; font-weight: bold;'>
+                {content_md}
+                </div>
+                <div style='font-size: 18px; margin-top: 10px;'>
+                - <i>{quote['speaker']} {quote['note']}</i> {dau}<br><br>
+                🏷️ <code>{quote['tag']}</code>
+                </div><br>
+                """, unsafe_allow_html=True)
+            else:
+                st.warning("Không có quote nào phù hợp với bộ lọc.")
+
+            col2, col1 = st.columns(2)
+
+            with col1:
+                if st.button("🎲 Quote khác"):
+                    pass
+
+            with col2:
+                if st.button("📝 Pending"):
+                    quote_id = quote["id"]
+                    df.loc[df["id"] == quote_id, "tag"] = df.loc[df["id"] == quote_id, "tag"].apply(
+                        lambda t: "#pending" if pd.isna(t) else t if "#pending" in t else f"{t} #pending"
+                    )
+                    st.session_state["quotes_df"] = df
+                    st.success("✅ Đã gắn tag #pending cho quote này.")
     with tab1:
         st.subheader("➕ Thêm quote mới")
 
@@ -235,6 +307,7 @@ def main_ui():
                         ignore_index=True
                     )
                     st.success("✅ Đã thêm quote mới vào bộ nhớ tạm.")
+                    update_reload()
 
     with tab2:
         with st.expander("📋 Danh sách toàn bộ quote"):
@@ -282,6 +355,7 @@ def main_ui():
                         st.session_state["quotes_df"].at[selected_index, "tag"] = new_tag
                         st.session_state["quotes_df"].at[selected_index, "link"] = new_link
                         st.success("✅ Đã cập nhật quote.")
+                        update_reload()
         else:
             st.info("Không tìm thấy quote nào khớp.")
 
@@ -337,22 +411,10 @@ def main_ui():
                             update_db_and_upload(target_db_file["id"], target_df)
                             st.success(f"✅ Đã copy {len(rows_to_copy)} quote sang `{target_db_file['name']}`.")
 
-                    if col_move.button("📂 Move sang database khác"):
-                        if target_db_file:
-                            target_df = load_quotes_from_drive(target_db_file["id"])
-                            # Lấy rows theo index
-                            rows_to_move = df.iloc[selected_ids].copy()
-                            rows_to_move["id"] = target_df["id"].max() + 1 if not target_df.empty else 1
-                            target_df = pd.concat([target_df, rows_to_move], ignore_index=True)
-                            # Xóa rows gốc theo index
-                            df = df.drop(df.index[selected_ids])
-                            update_db_and_upload(target_db_file["id"], target_df)
-                            # Cập nhật database gốc nếu cần (phần này bạn phải xử lý tiếp)
-
-
                     if col_delete.button("❌ Xác nhận xóa"):
                         st.session_state["quotes_df"] = df.drop(index=selected_ids).reset_index(drop=True)
                         st.success(f"✅ Đã xóa {len(selected_ids)} quote.")
+                        update_reload()
 
             else:
                 st.info("Không tìm thấy quote nào khớp.")
@@ -410,68 +472,6 @@ tab4, tab1, tab2, tab3 = st.tabs([
     "🗑️ Xóa Quote"
 ])
 
-with tab4:
-    df = st.session_state.get("quotes_df")
-    if df is None or df.empty:
-        st.info("Chưa có quote nào trong database.")
-    else:
-        all_tags = sorted(set(tag for tags in df["tag"].dropna() for tag in tags.split(" ")))
-
-        with st.sidebar:
-            st.markdown("🎛️ **Bộ lọc Tag Random**")
-
-            included_tags = st.multiselect("✅ Bao gồm 1 trong các tag:", options=all_tags, key="include_tags")
-
-            excluded_tags = st.multiselect(
-                "🚫 Loại bỏ các tag:",
-                options=all_tags,
-                default=all_tags,  # Mặc định loại bỏ toàn bộ tag
-                key="exclude_tags"
-            )
-
-
-
-        def quote_filter(row):
-            tags = set(row["tag"].split()) if pd.notna(row["tag"]) else set()
-            include_ok = not included_tags or any(tag in tags for tag in included_tags)
-            exclude_ok = not any(tag in tags for tag in excluded_tags)
-            return include_ok and exclude_ok
-
-        filtered_df = df[df.apply(quote_filter, axis=1)]
-
-        quote = None
-        if not filtered_df.empty:
-            quote = filtered_df.sample(1).iloc[0]
-            dau = f"({quote['date']})" if quote['date'] else ""
-            content_md = quote['content'].replace('\n', '<br>')
-            st.markdown(f"""
-            {quote['link']}
-            <div style='font-size: 22px; line-height: 1.6; font-weight: bold;'>
-            {content_md}
-            </div>
-            <div style='font-size: 18px; margin-top: 10px;'>
-            - <i>{quote['speaker']} {quote['note']}</i> {dau}<br><br>
-            🏷️ <code>{quote['tag']}</code>
-            </div><br>
-            """, unsafe_allow_html=True)
-        else:
-            st.warning("Không có quote nào phù hợp với bộ lọc.")
-
-        col2, col1 = st.columns(2)
-
-        with col1:
-            if st.button("🎲 Quote khác"):
-                pass
-
-        with col2:
-            if st.button("📝 Pending"):
-                quote_id = quote["id"]
-                df.loc[df["id"] == quote_id, "tag"] = df.loc[df["id"] == quote_id, "tag"].apply(
-                    lambda t: "#pending" if pd.isna(t) else t if "#pending" in t else f"{t} #pending"
-                )
-                st.session_state["quotes_df"] = df
-                st.success("✅ Đã gắn tag #pending cho quote này.")
-
 if selected_db_file:
     if (
         "quotes_df" not in st.session_state
@@ -484,17 +484,5 @@ if selected_db_file:
     else:
         quotes_df = st.session_state["quotes_df"]
     main_ui()
-    # --- Trong phần sidebar sau khi chọn selected_db_file ---
-    if selected_db_file:
-        if st.sidebar.button("💾 Cập nhật & Tải lên Drive"):
-            df_to_save = st.session_state.get("quotes_df")
-            if df_to_save is not None and not df_to_save.empty:
-                try:
-                    update_db_and_upload(selected_db_file["id"], df_to_save)
-                    st.sidebar.success("✅ Đã cập nhật database và tải lên Drive thành công.")
-                except Exception as e:
-                    st.sidebar.error(f"❌ Lỗi khi tải lên Drive: {e}")
-            else:
-                st.sidebar.warning("⚠️ Database trống, không có gì để cập nhật.")
 else:
     st.sidebar.info("🔑 Vui lòng nhập link thư mục Google Drive hợp lệ.")
