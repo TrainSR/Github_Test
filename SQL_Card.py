@@ -258,8 +258,9 @@ def main_ui():
                 {content_md}
                 </div>
                 <div style='font-size: 18px; margin-top: 10px;'>
-                - <i>{quote['speaker']} {quote['note']}</i> {dau}<br><br>
-                🏷️ <code>{quote['tag']}</code>
+                - <i>{quote['speaker']} {quote['note']}</i> {dau}<br>
+                🏷️ <code>{quote['tag']}</code><br>
+                🆔 ID: {quote['id']}
                 </div><br>
                 """, unsafe_allow_html=True)
             else:
@@ -486,3 +487,10 @@ if selected_db_file:
     main_ui()
 else:
     st.sidebar.info("🔑 Vui lòng nhập link thư mục Google Drive hợp lệ.")
+if "quotes_df" in st.session_state:
+    if st.sidebar.button("🧮 Gán lại ID theo dòng (0-based index)"):
+        df = st.session_state["quotes_df"]
+        df["id"] = df.index
+        st.session_state["quotes_df"] = df
+        st.sidebar.success("✅ Đã cập nhật cột `id` thành index dòng.")
+        update_reload()
